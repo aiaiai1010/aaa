@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>スマホ加速度センサ表示＆CSV記録（安定表示）</title>
+  <title>貧乏ゆすり測定（加速度センサ）</title>
   <style>
     body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      font-family: system-ui, -apple-system, "Segoe UI",
                    "Noto Sans JP", sans-serif;
       margin: 0;
       padding: 16px;
@@ -22,91 +22,155 @@
       box-shadow: 0 2px 4px rgba(0,0,0,0.06);
     }
     .buttons {
-      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
     }
     button {
-      padding: 8px 12px; font-size: 14px; border-radius: 999px;
-      border: 1px solid #ccc; background: #fafafa; cursor: pointer;
+      padding: 8px 12px;
+      font-size: 14px;
+      border-radius: 999px;
+      border: 1px solid #ccc;
+      background: #fafafa;
+      cursor: pointer;
     }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    input[type="number"] {
-      width: 120px; padding: 6px; font-size: 14px;
+    .status {
+      font-size: 13px;
+      color: #555;
+      white-space: pre-line;
+      margin-top: 4px;
     }
+    .highlight { font-weight: bold; color: #0077cc; }
     table {
-      width: 100%; border-collapse: collapse; font-size: 13px;
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 8px;
     }
     th, td {
-      padding: 4px 6px; border-bottom: 1px solid #eee; text-align: right;
+      padding: 4px 6px;
+      border-bottom: 1px solid #eee;
+      text-align: right;
     }
-    th { background: #fafafa; position: sticky; top: 0; }
-    .status { font-size: 13px; color: #555; margin-top: 4px; white-space: pre-line; }
-    .highlight { font-weight: bold; color: #0077cc; }
+    th { background: #fafafa; }
+    pre {
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
-  <h1>スマホ加速度センサ表示＆CSV記録（安定表示）</h1>
+  <h1>貧乏ゆすり測定（加速度センサ）</h1>
 
   <div class="card">
-    <p style="font-size:13px;">
-      ①「センサ許可」で端末の動きを許可<br>
-      ② 記録間隔を設定し「記録開始」→「記録停止」<br>
-      ③ 「CSVダウンロード」で保存<br>
-      ※画面表示は0.2秒ごとに更新します。
+    <p style="font-size:13px; line-height:1.5;">
+      ● スマホを足の上（太ももなど）に乗せてください。できれば画面を上にしてまっすぐに置きます。<br>
+      ● このページは <span class="highlight">重力を除いた加速度（acceleration）</span> を使って、貧乏ゆすりの「揺らす速さ（テンポ）」を求めます。<br><br>
+      手順：<br>
+      ① 「センサ許可」を押してブラウザにセンサ利用を許可<br>
+      ② 「計測開始」を押して貧乏ゆすりを開始<br>
+      ③ 終わったら「計測停止＆解析」を押すと、平均周期や回数/秒・回数/分を計算します。
     </p>
   </div>
 
   <div class="card">
-    <label>記録間隔（秒）</label>
-    <input id="intervalInput" type="number" min="0.01" step="0.1" value="0.5">
     <div class="buttons">
       <button id="btnPermission">① センサ許可</button>
-      <button id="btnStart" disabled>② 記録開始</button>
-      <button id="btnStop" disabled>③ 記録停止</button>
-      <button id="btnDownload" disabled>④ CSVダウンロード</button>
+      <button id="btnStart" disabled>② 計測開始</button>
+      <button id="btnStop" disabled>③ 計測停止＆解析</button>
     </div>
     <div id="status" class="status"></div>
   </div>
 
   <div class="card">
-    <div class="status"><span class="highlight">現在のセンサ値</span><br>
+    <div class="status">
+      <span class="highlight">現在の加速度（重力なし）Z軸</span><br>
       <span id="currentTime">time: -</span>
     </div>
     <table>
-      <thead><tr><th>X</th><th>Y</th><th>Z</th></tr></thead>
-      <tbody><tr><td id="accX">-</td><td id="accY">-</td><td id="accZ">-</td></tr></tbody>
+      <thead>
+        <tr><th>Z軸加速度 a<sub>z</sub> (m/s²)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td id="accZ">-</td></tr>
+      </tbody>
     </table>
   </div>
 
+  <div class="card">
+    <span class="highlight">解析結果</span>
+    <pre id="resultText">まだ計測していません。</pre>
+  </div>
+
   <script>
+    // ==========
+    // ユーティリティ
+    // ==========
+    const $ = id => document.getElementById(id);
+    const fmt2 = v => (v == null || isNaN(v) ? '-' : v.toFixed(2));
+
+    const statusEl = $('status');
+    const accZEl = $('accZ');
+    const timeEl = $('currentTime');
+    const resultEl = $('resultText');
+
     let lastMotion = null;
     let displayTimer = null;
-    let logTimer = null;
-    let logs = [];
-    let startPerf = 0;
 
-    const fmt = v => (v==null||isNaN(v)?'-':v.toFixed(2));
-    const $ = id => document.getElementById(id);
+    let recording = false;
+    let samples = []; // { t: ms, a: az }
 
+    // ==========
+    // センサ許可
+    // ==========
     $('btnPermission').onclick = async () => {
-      if (typeof DeviceMotionEvent?.requestPermission === 'function') {
+      if (typeof DeviceMotionEvent !== 'undefined' &&
+          typeof DeviceMotionEvent.requestPermission === 'function') {
         try {
           const res = await DeviceMotionEvent.requestPermission();
-          if (res === 'granted') startSensor();
-          else alert('センサの利用が許可されませんでした。');
-        } catch (e) { alert('許可取得中にエラーが発生しました'); }
-      } else startSensor();
+          if (res === 'granted') {
+            startSensor();
+          } else {
+            alert('センサの利用が許可されませんでした。');
+          }
+        } catch (e) {
+          console.error(e);
+          alert('センサ許可の取得中にエラーが発生しました。');
+        }
+      } else {
+        // Androidなど、許可APIが不要な場合
+        startSensor();
+      }
     };
 
     function startSensor() {
       if (!window.DeviceMotionEvent) {
-        alert('この端末はDeviceMotionに非対応です');
+        alert('この端末 / ブラウザは DeviceMotion に対応していません。');
         return;
       }
-      window.addEventListener('devicemotion', e => lastMotion = e);
-      $('status').textContent = 'センサが有効になりました';
-      $('btnStart').disabled = false;
 
-      // ★ 表示は0.2秒に1回だけ更新（がくがく防止）
+      window.addEventListener('devicemotion', e => {
+        lastMotion = e;
+        if (recording) {
+          const a = e.acceleration || {};
+          const az = (typeof a.z === 'number') ? a.z : 0;
+          const t = performance.now();
+          samples.push({ t, a: az });
+        }
+      });
+
+      statusEl.textContent =
+        'センサが有効になりました。\n' +
+        '「計測開始」を押すと貧乏ゆすりの測定が始まります。';
+
+      $('btnStart').disabled = false;
+      $('btnPermission').disabled = true;
+
+      // 画面表示は0.2秒ごとに更新（がくがく防止）
       if (displayTimer) clearInterval(displayTimer);
       displayTimer = setInterval(updateDisplay, 200);
     }
@@ -114,51 +178,134 @@
     function updateDisplay() {
       if (!lastMotion) return;
       const a = lastMotion.acceleration || {};
-      $('currentTime').textContent = 'time: ' + new Date().toISOString();
-      $('accX').textContent = fmt(a.x);
-      $('accY').textContent = fmt(a.y);
-      $('accZ').textContent = fmt(a.z);
+      const az = (typeof a.z === 'number') ? a.z : 0;
+      timeEl.textContent = 'time: ' + new Date().toISOString();
+      accZEl.textContent = fmt2(az);
     }
 
+    // ==========
+    // 計測開始
+    // ==========
     $('btnStart').onclick = () => {
-      const interval = parseFloat($('intervalInput').value) * 1000;
-      if (!interval || interval <= 0) { alert('正しい間隔を入力'); return; }
-      logs = [['time_iso','elapsed_ms','acc_x','acc_y','acc_z','interval_ms']];
-      startPerf = performance.now();
-      $('status').textContent = `記録中（${interval/1000}sごと）`;
+      samples = [];
+      recording = true;
+      statusEl.textContent =
+        '計測中です。\n足を一定のリズムで貧乏ゆすりしてください。';
+      resultEl.textContent = '計測中…';
+
       $('btnStart').disabled = true;
       $('btnStop').disabled = false;
-      $('btnDownload').disabled = false;
-
-      logTimer = setInterval(() => {
-        if (!lastMotion) return;
-        const a = lastMotion.acceleration || {};
-        logs.push([
-          new Date().toISOString(),
-          (performance.now()-startPerf).toFixed(1),
-          a.x ?? '', a.y ?? '', a.z ?? '', interval
-        ].join(','));
-      }, interval);
     };
 
+    // ==========
+    // 計測停止＆解析
+    // ==========
     $('btnStop').onclick = () => {
-      clearInterval(logTimer);
-      $('status').textContent = '記録停止。CSVをダウンロードできます。';
+      recording = false;
       $('btnStart').disabled = false;
       $('btnStop').disabled = true;
+
+      if (samples.length < 10) {
+        statusEl.textContent = 'データが少なすぎて解析できませんでした。';
+        resultEl.textContent = 'もう一度、3秒以上測定してみてください。';
+        return;
+      }
+
+      const result = analyzeLegShake(samples);
+      statusEl.textContent = '計測を停止し、解析を行いました。';
+      resultEl.textContent = result;
     };
 
-    $('btnDownload').onclick = () => {
-      if (logs.length <= 1) { alert('データなし'); return; }
-      const csv = logs.join('\n');
-      const blob = new Blob([csv], {type:'text/csv'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'sensor_log_'+new Date().toISOString().replace(/[:]/g,'-')+'.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    };
+    // ==========
+    // 解析ロジック
+    // ==========
+    function analyzeLegShake(data) {
+      const n = data.length;
+      const tStart = data[0].t;
+      const tEnd = data[n - 1].t;
+      const durationSec = (tEnd - tStart) / 1000;
+
+      // 1) 平均値を引いて「振動成分だけ」にする（ドリフト除去）
+      let sum = 0;
+      for (const d of data) sum += d.a;
+      const mean = sum / n;
+      const detrended = data.map(d => ({ t: d.t, a: d.a - mean }));
+
+      // 2) 簡単な平滑化（移動平均）でノイズを減らす
+      const smoothed = smooth(detrended, 5);
+
+      // 3) RMSからしきい値を作ってピーク検出
+      let sumSq = 0;
+      for (const s of smoothed) sumSq += s.a * s.a;
+      const rms = Math.sqrt(sumSq / n);
+      const threshold = Math.max(rms * 0.7, 0.1); // 小さすぎる場合の保険
+
+      const peaks = [];
+      for (let i = 1; i < smoothed.length - 1; i++) {
+        const p = smoothed[i - 1].a;
+        const c = smoothed[i].a;
+        const n_ = smoothed[i + 1].a;
+        if (c > p && c > n_ && c > threshold) {
+          peaks.push({ t: smoothed[i].t, a: c });
+        }
+      }
+
+      if (peaks.length < 2) {
+        return (
+          'ピーク（上下動の山）が十分に検出できませんでした。\n' +
+          'もう少し大きめに、一定のリズムで揺らしてみてください。'
+        );
+      }
+
+      // 4) ピーク間隔から周期と回数/秒・回数/分を求める
+      const intervals = [];
+      for (let i = 1; i < peaks.length; i++) {
+        const dt = (peaks[i].t - peaks[i - 1].t) / 1000; // s
+        intervals.push(dt);
+      }
+      let sumDt = 0;
+      for (const dt of intervals) sumDt += dt;
+      const avgPeriod = sumDt / intervals.length; // s/回
+      const freqHz = 1 / avgPeriod;              // 回/秒
+      const bpm = freqHz * 60;                   // 回/分
+
+      // 平均振幅（どれくらい強く揺らしているかの目安）
+      let sumAmp = 0;
+      for (const p of peaks) sumAmp += p.a;
+      const avgAmp = sumAmp / peaks.length;
+
+      let text = '';
+      text += `計測時間        : ${fmt2(durationSec)} 秒\n`;
+      text += `サンプル数      : ${n} 点\n`;
+      text += `検出ピーク数    : ${peaks.length} 回（上下動の山）\n\n`;
+      text += `平均周期        : ${fmt2(avgPeriod)} 秒/回\n`;
+      text += `平均頻度        : ${fmt2(freqHz)} 回/秒\n`;
+      text += `                ≈ ${Math.round(bpm)} 回/分（bpm）\n\n`;
+      text += `平均加速度振幅  : ${fmt2(avgAmp)} m/s²（揺らしの強さの目安）\n\n`;
+      text += '※スマホはできるだけ足の上でズレないように置いてください。\n' +
+              '※これは簡易的な推定です。正確な物理量というより「テンポの指標」として使ってください。';
+
+      return text;
+    }
+
+    // 移動平均で平滑化
+    function smooth(data, windowSize) {
+      const half = Math.floor(windowSize / 2);
+      const out = [];
+      for (let i = 0; i < data.length; i++) {
+        let s = 0;
+        let c = 0;
+        for (let j = -half; j <= half; j++) {
+          const k = i + j;
+          if (k >= 0 && k < data.length) {
+            s += data[k].a;
+            c++;
+          }
+        }
+        out.push({ t: data[i].t, a: s / c });
+      }
+      return out;
+    }
   </script>
 </body>
 </html>
